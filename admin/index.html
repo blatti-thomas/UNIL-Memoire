@@ -11,15 +11,17 @@
   h1 { font-size: 1.3rem; margin: 0 0 1rem; }
   label { display: block; font-size: .85rem; color: #555; margin: .8rem 0 .2rem; }
   input, textarea { width: 100%; box-sizing: border-box; font: inherit; padding: .5rem; border: 1px solid #bbb; border-radius: 6px; }
+  input[type=file] { padding: .35rem; }
   textarea { resize: vertical; }
   button { font: inherit; padding: .45rem .8rem; border: 1px solid #888; border-radius: 6px; background: #f4f4f4; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
   button.primary { background: #111; color: #fff; border-color: #111; }
   button.danger { color: #b00020; }
   .sec { border: 1px solid #ddd; border-radius: 10px; padding: .75rem; margin: 1rem 0; }
   .sec-head { display: flex; gap: .4rem; }
   .sec-head input { font-weight: 600; }
   .item { border-top: 1px solid #eee; padding-top: .25rem; margin-top: .75rem; }
-  .row { display: flex; gap: .4rem; margin-top: .5rem; }
+  .row { display: flex; gap: .4rem; margin-top: .5rem; flex-wrap: wrap; }
   #bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid #ddd; padding: .7rem 1rem; display: flex; gap: .75rem; align-items: center; justify-content: center; flex-wrap: wrap; }
   #bar[hidden], #setup[hidden], #editor[hidden] { display: none; }
   #msg { font-size: .9rem; }
@@ -50,6 +52,7 @@
   'use strict';
   var API = 'https://api.github.com';
   var PATH = '_data/site.json';
+  var MAX_PDF = 25 * 1024 * 1024;
   var repo = null, token = null, sha = null, data = null, dirty = false;
 
   function $(id) { return document.getElementById(id); }
@@ -77,8 +80,8 @@
     return owner + '/' + seg;
   }
 
-  function gh(method, body) {
-    return fetch(API + '/repos/' + repo + '/contents/' + PATH, {
+  function api(path, method, body) {
+    return fetch(API + '/repos/' + repo + '/contents/' + path, {
       method: method,
       cache: 'no-store',
       headers: {
@@ -97,6 +100,7 @@
     d.title = d.title || '';
     d.author = d.author || '';
     d.intro = d.intro || '';
+    d.pdf = d.pdf || '';
     d.sections = Array.isArray(d.sections) ? d.sections : [];
     d.sections.forEach(function (s) {
       s.name = s.name || '';
@@ -111,6 +115,7 @@
       title: data.title.trim(),
       author: data.author.trim(),
       intro: data.intro.trim(),
+      pdf: data.pdf,
       sections: data.sections
         .filter(function (s) { return s.name.trim() !== ''; })
         .map(function (s) {
@@ -122,6 +127,66 @@
           };
         })
     };
+  }
+
+  function saveSite(message) {
+    var body = {
+      message: message,
+      content: toB64(JSON.stringify(clean(), null, 2) + '\n'),
+      sha: sha
+    };
+    return api(PATH, 'PUT', body).then(function (j) {
+      sha = j.content.sha;
+      dirty = false;
+    });
+  }
+
+  function errText(e, what) {
+    if (e.status === 409 || e.status === 422) return 'Le contenu a changé ailleurs. Recharger la page puis refaire la modification.';
+    if (e.status === 401 || e.status === 403) return 'Jeton invalide, expiré ou sans droit d\'écriture (code ' + e.status + ').';
+    return 'Échec ' + what + (e.status ? ' (code ' + e.status + ')' : '') + '.';
+  }
+
+  function uploadPdf() {
+    var input = $('pdfIn');
+    var file = input && input.files && input.files[0];
+    if (!file) { setMsg('Choisir un fichier PDF.', 'err'); return; }
+    if (file.type !== 'application/pdf' && !/\.pdf$/i.test(file.name)) { setMsg('Ce fichier n\'est pas un PDF.', 'err'); return; }
+    if (file.size > MAX_PDF) { setMsg('PDF trop lourd (25 Mo maximum).', 'err'); return; }
+
+    var oldPath = data.pdf;
+    var newPath = 'files/memoire-' + Date.now() + '.pdf';
+    var btnUp = $('pdfBtn');
+    btnUp.disabled = true;
+    setMsg('Envoi du PDF...');
+
+    var reader = new FileReader();
+    reader.onerror = function () { btnUp.disabled = false; setMsg('Lecture du fichier impossible.', 'err'); };
+    reader.onload = function () {
+      var b64 = String(reader.result).split(',')[1];
+      api(newPath, 'PUT', { message: 'Ajout du PDF', content: b64 })
+        .then(function () {
+          data.pdf = newPath;
+          setMsg('PDF envoyé, mise à jour de la page...');
+          return saveSite('Mise à jour du PDF');
+        })
+        .then(function () {
+          if (!oldPath) return null;
+          return api(oldPath, 'GET').then(function (old) {
+            return api(oldPath, 'DELETE', { message: 'Suppression de l\'ancien PDF', sha: old.sha });
+          }).catch(function () { return null; });
+        })
+        .then(function () {
+          setMsg('PDF en ligne. La page publique se met à jour en 1 à 2 minutes.', 'ok');
+          render();
+        })
+        .catch(function (e) {
+          data.pdf = oldPath;
+          setMsg(errText(e, 'de l\'envoi du PDF'), 'err');
+        })
+        .then(function () { btnUp.disabled = false; });
+    };
+    reader.readAsDataURL(file);
   }
 
   function el(tag, props) {
@@ -149,13 +214,30 @@
     mark(); render();
   }
 
+  function pdfBox() {
+    var file = el('input', { type: 'file', id: 'pdfIn', accept: 'application/pdf,.pdf' });
+    var current = data.pdf
+      ? el('p', { className: 'hint', textContent: 'PDF actuel : ' + data.pdf })
+      : el('p', { className: 'hint', textContent: 'Aucun PDF pour l\'instant.' });
+    var up = btn('Déposer le PDF', uploadPdf, 'primary');
+    up.id = 'pdfBtn';
+    return el('div', { className: 'sec' },
+      el('label', { textContent: 'Document PDF (affiché sur la page publique)' }),
+      current,
+      file,
+      el('p', { className: 'hint', textContent: 'PDF uniquement, 25 Mo maximum. Le PDF précédent est remplacé.' }),
+      el('div', { className: 'row' }, up)
+    );
+  }
+
   function render() {
     var ed = $('editor');
     ed.replaceChildren();
     ed.append(
       field('Titre', input(data, 'title')),
       field('Auteur - établissement - année', input(data, 'author')),
-      field('Phrase de présentation (optionnelle)', area(data, 'intro', 2))
+      field('Phrase de présentation (optionnelle)', area(data, 'intro', 2)),
+      pdfBox()
     );
     data.sections.forEach(function (s, si) {
       var box = el('div', { className: 'sec' });
@@ -202,7 +284,7 @@
     $('setup').hidden = true;
     $('bar').hidden = false;
     setMsg('Chargement...');
-    gh('GET').then(function (j) {
+    api(PATH, 'GET').then(function (j) {
       sha = j.sha;
       data = normalize(JSON.parse(fromB64(j.content)));
       render();
@@ -219,22 +301,10 @@
     var b = $('save');
     b.disabled = true;
     setMsg('Enregistrement...');
-    var body = {
-      message: 'Mise à jour du contenu',
-      content: toB64(JSON.stringify(clean(), null, 2) + '\n'),
-      sha: sha
-    };
-    gh('PUT', body).then(function (j) {
-      sha = j.content.sha;
-      dirty = false;
+    saveSite('Mise à jour du contenu').then(function () {
       setMsg('Enregistré. La page publique se met à jour en 1 à 2 minutes.', 'ok');
     }).catch(function (e) {
-      var m = (e.status === 409 || e.status === 422)
-        ? 'Le contenu a changé ailleurs. Recharger la page puis refaire la modification.'
-        : (e.status === 401 || e.status === 403)
-          ? 'Jeton invalide ou expiré (code ' + e.status + ').'
-          : 'Échec de l\'enregistrement' + (e.status ? ' (code ' + e.status + ')' : '') + '.';
-      setMsg(m, 'err');
+      setMsg(errText(e, 'de l\'enregistrement'), 'err');
     }).then(function () { b.disabled = false; });
   }
 
