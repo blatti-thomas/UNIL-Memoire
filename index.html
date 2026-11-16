@@ -6,16 +6,52 @@ layout: default
 {% if d.author and d.author != "" %}<p class="meta">{{ d.author | escape }}</p>{% endif %}
 {% if d.intro and d.intro != "" %}<p>{{ d.intro | escape }}</p>{% endif %}
 {% if d.pdf and d.pdf != "" %}
-<div style="border:1px solid #ddd;border-radius:10px;padding:1.1rem 1.25rem;margin:1.5rem 0;display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;justify-content:space-between;">
-  <div>
-    <strong>Document complet</strong>
-    <div style="color:#666;font-size:.9rem;">PDF</div>
-  </div>
-  <div style="display:flex;gap:.5rem;flex-wrap:wrap;">
-    <a href="{{ d.pdf | relative_url }}" target="_blank" rel="noopener" style="background:#111;color:#fff;padding:.5rem .9rem;border-radius:6px;text-decoration:none;">Lire</a>
-    <a href="{{ d.pdf | relative_url }}" download style="border:1px solid #888;color:#111;padding:.5rem .9rem;border-radius:6px;text-decoration:none;">Télécharger</a>
-  </div>
+<div id="pdf-wrap" style="margin:1.5rem 0;">
+  <div id="pdf-viewer" style="height:80vh;overflow-y:auto;background:#eee;border:1px solid #ddd;border-radius:10px;padding:12px 0;"></div>
+  <p style="margin:.6rem 0 0;font-size:.9rem;">
+    <a href="{{ d.pdf | relative_url }}" target="_blank" rel="noopener">Ouvrir en plein écran</a>
+    &middot;
+    <a href="{{ d.pdf | relative_url }}" download>Télécharger le PDF</a>
+  </p>
 </div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+(function () {
+  var url = {{ d.pdf | relative_url | jsonify }};
+  var viewer = document.getElementById('pdf-viewer');
+  if (!window.pdfjsLib) { viewer.textContent = 'Aperçu indisponible, utilisez les liens ci-dessous.'; return; }
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  pdfjsLib.getDocument(url).promise.then(function (pdf) {
+    var dpr = window.devicePixelRatio || 1;
+    var canvases = [];
+    for (var n = 1; n <= pdf.numPages; n++) {
+      var c = document.createElement('canvas');
+      c.style.display = 'block';
+      c.style.margin = '0 auto 12px';
+      c.style.background = '#fff';
+      c.style.boxShadow = '0 1px 3px rgba(0,0,0,.15)';
+      c.style.maxWidth = 'calc(100% - 24px)';
+      viewer.appendChild(c);
+      canvases.push(c);
+    }
+    canvases.forEach(function (canvas, i) {
+      pdf.getPage(i + 1).then(function (page) {
+        var base = page.getViewport({ scale: 1 });
+        var width = Math.min(viewer.clientWidth - 24, 900);
+        var scale = width / base.width;
+        var vp = page.getViewport({ scale: scale * dpr });
+        canvas.width = vp.width;
+        canvas.height = vp.height;
+        canvas.style.width = width + 'px';
+        canvas.style.height = (vp.height / dpr) + 'px';
+        page.render({ canvasContext: canvas.getContext('2d'), viewport: vp });
+      });
+    });
+  }).catch(function () {
+    viewer.textContent = 'Aperçu indisponible, utilisez les liens ci-dessous.';
+  });
+})();
+</script>
 {% endif %}
 {% for s in d.sections %}
 <h2>{{ s.name | escape }}</h2>
