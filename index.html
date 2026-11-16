@@ -21,8 +21,10 @@ layout: default
   var viewer = document.getElementById('pdf-viewer');
   if (!window.pdfjsLib) { viewer.textContent = 'Aperçu indisponible, utilisez les liens ci-dessous.'; return; }
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  pdfjsLib.getDocument(url).promise.then(function (pdf) {
+  var cdn = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  pdfjsLib.getDocument({ url: url, cMapUrl: cdn + 'cmaps/', cMapPacked: true, standardFontDataUrl: cdn + 'standard_fonts/' }).promise.then(function (pdf) {
     var dpr = window.devicePixelRatio || 1;
+    var quality = Math.min(Math.max(dpr, 2.5), 3.5);
     var canvases = [];
     for (var n = 1; n <= pdf.numPages; n++) {
       var c = document.createElement('canvas');
@@ -39,11 +41,11 @@ layout: default
         var base = page.getViewport({ scale: 1 });
         var width = Math.min(viewer.clientWidth - 24, 900);
         var scale = width / base.width;
-        var vp = page.getViewport({ scale: scale * dpr });
+        var vp = page.getViewport({ scale: scale * quality });
         canvas.width = vp.width;
         canvas.height = vp.height;
         canvas.style.width = width + 'px';
-        canvas.style.height = (vp.height / dpr) + 'px';
+        canvas.style.height = (vp.height / quality) + "px";
         page.render({ canvasContext: canvas.getContext('2d'), viewport: vp });
       });
     });
