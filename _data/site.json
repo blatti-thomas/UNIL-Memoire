@@ -1,0 +1,26 @@
+{
+  "title": "Titre du travail de mémoire",
+  "author": "Prénom Nom - Établissement - Année",
+  "intro": "Cette page regroupe les sources citées dans le poster.",
+  "sections": [
+    {
+      "name": "Livres",
+      "items": [
+        { "text": "Nom, Prénom. *Titre du livre*. Ville : Éditeur, année.", "url": "" },
+        { "text": "Nom, Prénom. *Titre du livre*. Ville : Éditeur, année.", "url": "" }
+      ]
+    },
+    {
+      "name": "Articles",
+      "items": [
+        { "text": "Nom, Prénom. « Titre de l'article ». *Nom de la revue*, vol. X, n° Y, année, p. 1-10.", "url": "" }
+      ]
+    },
+    {
+      "name": "Sites web",
+      "items": [
+        { "text": "Nom du site. Titre de la page. Consulté le JJ.MM.AAAA.", "url": "https://exemple.ch" }
+      ]
+    }
+  ]
+}

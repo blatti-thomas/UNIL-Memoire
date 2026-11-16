@@ -1,0 +1,15 @@
+---
+layout: default
+---
+{% assign d = site.data.site %}
+<h1>{{ d.title | escape }}</h1>
+{% if d.author and d.author != "" %}<p class="meta">{{ d.author | escape }}</p>{% endif %}
+{% if d.intro and d.intro != "" %}<p>{{ d.intro | escape }}</p>{% endif %}
+{% for s in d.sections %}
+<h2>{{ s.name | escape }}</h2>
+<ol>
+{% for i in s.items %}
+  <li>{{ i.text | markdownify | remove: "<p>" | remove: "</p>" }}{% if i.url and i.url != "" %} <a href="{{ i.url | escape }}">{{ i.url | escape }}</a>{% endif %}</li>
+{% endfor %}
+</ol>
+{% endfor %}

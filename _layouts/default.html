@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ site.data.site.title | escape }}</title>
+  <meta name="robots" content="noindex">
+  <style>
+    body {
+      margin: 0;
+      background: #fff;
+      color: #111;
+      font: 17px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    main { max-width: 40rem; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 .25rem; }
+    h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
+    .meta { color: #666; margin: 0 0 1.5rem; }
+    ol { padding-left: 1.4rem; }
+    li { margin-bottom: .6rem; }
+    a { color: #0645ad; word-break: break-word; }
+  </style>
+</head>
+<body>
+  <main>
+    {{ content }}
+  </main>
+</body>
+</html>

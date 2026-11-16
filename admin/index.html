@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Mise à jour</title>
+<style>
+  body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #111; background: #fff; }
+  main { max-width: 42rem; margin: 0 auto; padding: 1.25rem 1rem 7rem; }
+  h1 { font-size: 1.3rem; margin: 0 0 1rem; }
+  label { display: block; font-size: .85rem; color: #555; margin: .8rem 0 .2rem; }
+  input, textarea { width: 100%; box-sizing: border-box; font: inherit; padding: .5rem; border: 1px solid #bbb; border-radius: 6px; }
+  textarea { resize: vertical; }
+  button { font: inherit; padding: .45rem .8rem; border: 1px solid #888; border-radius: 6px; background: #f4f4f4; cursor: pointer; }
+  button.primary { background: #111; color: #fff; border-color: #111; }
+  button.danger { color: #b00020; }
+  .sec { border: 1px solid #ddd; border-radius: 10px; padding: .75rem; margin: 1rem 0; }
+  .sec-head { display: flex; gap: .4rem; }
+  .sec-head input { font-weight: 600; }
+  .item { border-top: 1px solid #eee; padding-top: .25rem; margin-top: .75rem; }
+  .row { display: flex; gap: .4rem; margin-top: .5rem; }
+  #bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid #ddd; padding: .7rem 1rem; display: flex; gap: .75rem; align-items: center; justify-content: center; flex-wrap: wrap; }
+  #bar[hidden], #setup[hidden], #editor[hidden] { display: none; }
+  #msg { font-size: .9rem; }
+  .ok { color: #0a6b2d; }
+  .err { color: #b00020; }
+  .hint { font-size: .8rem; color: #777; margin: .25rem 0 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Mise à jour de la page</h1>
+  <div id="setup" hidden>
+    <p id="setupMsg" class="err"></p>
+    <div id="repoField"><label for="repoIn">Dépôt (utilisateur/nom)</label><input id="repoIn" type="text" placeholder="utilisateur/depot"></div>
+    <label for="tokenIn">Jeton d'accès</label>
+    <input id="tokenIn" type="password" autocomplete="off">
+    <div class="row"><button class="primary" id="setupBtn">Valider</button></div>
+  </div>
+  <div id="editor" hidden></div>
+</main>
+<div id="bar" hidden>
+  <button class="primary" id="save">Enregistrer</button>
+  <a href="../" target="_blank" rel="noopener">Voir la page</a>
+  <span id="msg"></span>
+</div>
+<script>
+(function () {
+  'use strict';
+  var API = 'https://api.github.com';
+  var PATH = '_data/site.json';
+  var repo = null, token = null, sha = null, data = null, dirty = false;
+
+  function $(id) { return document.getElementById(id); }
+  var store = {
+    get: function (k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+    set: function (k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+  };
+  function fromB64(s) {
+    return new TextDecoder().decode(Uint8Array.from(atob(s.replace(/\s/g, '')), function (c) { return c.charCodeAt(0); }));
+  }
+  function toB64(s) {
+    var b = new TextEncoder().encode(s), t = '';
+    for (var i = 0; i < b.length; i++) t += String.fromCharCode(b[i]);
+    return btoa(t);
+  }
+  function setMsg(text, cls) { var m = $('msg'); m.textContent = text || ''; m.className = cls || ''; }
+  function mark() { dirty = true; setMsg('Modifications non enregistrées'); }
+
+  function detectRepo() {
+    var host = location.hostname;
+    if (!/\.github\.io$/.test(host)) return null;
+    var owner = host.split('.')[0];
+    var seg = location.pathname.split('/')[1];
+    if (!seg || seg === 'admin') return owner + '/' + host;
+    return owner + '/' + seg;
+  }
+
+  function gh(method, body) {
+    return fetch(API + '/repos/' + repo + '/contents/' + PATH, {
+      method: method,
+      cache: 'no-store',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Accept': 'application/vnd.github+json',
+        'Content-Type': 'application/json'
+      },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      if (!r.ok) { var e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
+      return r.json();
+    });
+  }
+
+  function normalize(d) {
+    d.title = d.title || '';
+    d.author = d.author || '';
+    d.intro = d.intro || '';
+    d.sections = Array.isArray(d.sections) ? d.sections : [];
+    d.sections.forEach(function (s) {
+      s.name = s.name || '';
+      s.items = Array.isArray(s.items) ? s.items : [];
+      s.items.forEach(function (i) { i.text = i.text || ''; i.url = i.url || ''; });
+    });
+    return d;
+  }
+
+  function clean() {
+    return {
+      title: data.title.trim(),
+      author: data.author.trim(),
+      intro: data.intro.trim(),
+      sections: data.sections
+        .filter(function (s) { return s.name.trim() !== ''; })
+        .map(function (s) {
+          return {
+            name: s.name.trim(),
+            items: s.items
+              .filter(function (i) { return i.text.trim() !== ''; })
+              .map(function (i) { return { text: i.text.trim(), url: i.url.trim() }; })
+          };
+        })
+    };
+  }
+
+  function el(tag, props) {
+    var e = document.createElement(tag);
+    Object.assign(e, props || {});
+    for (var k = 2; k < arguments.length; k++) e.append(arguments[k]);
+    return e;
+  }
+  function btn(label, fn, cls) { return el('button', { type: 'button', textContent: label, onclick: fn, className: cls || '' }); }
+  function field(label, node, hint) {
+    var d = el('div', {}, el('label', { textContent: label }), node);
+    if (hint) d.append(el('p', { className: 'hint', textContent: hint }));
+    return d;
+  }
+  function input(obj, key, ph) {
+    return el('input', { type: 'text', value: obj[key], placeholder: ph || '', oninput: function (e) { obj[key] = e.target.value; mark(); } });
+  }
+  function area(obj, key, rows, ph) {
+    return el('textarea', { rows: rows, value: obj[key], placeholder: ph || '', oninput: function (e) { obj[key] = e.target.value; mark(); } });
+  }
+  function move(arr, i, d) {
+    var j = i + d;
+    if (j < 0 || j >= arr.length) return;
+    var t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+    mark(); render();
+  }
+
+  function render() {
+    var ed = $('editor');
+    ed.replaceChildren();
+    ed.append(
+      field('Titre', input(data, 'title')),
+      field('Auteur - établissement - année', input(data, 'author')),
+      field('Phrase de présentation (optionnelle)', area(data, 'intro', 2))
+    );
+    data.sections.forEach(function (s, si) {
+      var box = el('div', { className: 'sec' });
+      box.append(el('div', { className: 'sec-head' },
+        input(s, 'name', 'Nom de la section (ex. Livres)'),
+        btn('↑', function () { move(data.sections, si, -1); }),
+        btn('↓', function () { move(data.sections, si, 1); }),
+        btn('✕', function () {
+          if (confirm('Supprimer cette section et toutes ses sources ?')) { data.sections.splice(si, 1); mark(); render(); }
+        }, 'danger')
+      ));
+      s.items.forEach(function (it, ii) {
+        var row = el('div', { className: 'item' });
+        row.append(
+          field('Source', area(it, 'text', 2, 'Nom, Prénom. *Titre*. Ville : Éditeur, année.'), 'Italique : *texte* - gras : **texte**'),
+          field('Lien (optionnel)', input(it, 'url', 'https://...')),
+          el('div', { className: 'row' },
+            btn('↑', function () { move(s.items, ii, -1); }),
+            btn('↓', function () { move(s.items, ii, 1); }),
+            btn('Supprimer', function () { s.items.splice(ii, 1); mark(); render(); }, 'danger'))
+        );
+        box.append(row);
+      });
+      box.append(el('div', { className: 'row' }, btn('+ Ajouter une source', function () {
+        s.items.push({ text: '', url: '' }); mark(); render();
+      })));
+      ed.append(box);
+    });
+    ed.append(btn('+ Ajouter une section', function () {
+      data.sections.push({ name: '', items: [{ text: '', url: '' }] }); mark(); render();
+    }));
+  }
+
+  function showSetup(msg) {
+    $('setup').hidden = false;
+    $('editor').hidden = true;
+    $('bar').hidden = true;
+    $('setupMsg').textContent = msg || '';
+    $('repoField').hidden = !!detectRepo();
+    $('repoIn').value = repo || '';
+  }
+
+  function start() {
+    $('setup').hidden = true;
+    $('bar').hidden = false;
+    setMsg('Chargement...');
+    gh('GET').then(function (j) {
+      sha = j.sha;
+      data = normalize(JSON.parse(fromB64(j.content)));
+      render();
+      $('editor').hidden = false;
+      dirty = false;
+      setMsg('');
+    }).catch(function (e) {
+      var m = e.status ? 'Accès refusé ou fichier introuvable (code ' + e.status + '). Vérifier le jeton et le dépôt.' : 'Erreur réseau ou fichier illisible.';
+      showSetup(m);
+    });
+  }
+
+  function save() {
+    var b = $('save');
+    b.disabled = true;
+    setMsg('Enregistrement...');
+    var body = {
+      message: 'Mise à jour du contenu',
+      content: toB64(JSON.stringify(clean(), null, 2) + '\n'),
+      sha: sha
+    };
+    gh('PUT', body).then(function (j) {
+      sha = j.content.sha;
+      dirty = false;
+      setMsg('Enregistré. La page publique se met à jour en 1 à 2 minutes.', 'ok');
+    }).catch(function (e) {
+      var m = (e.status === 409 || e.status === 422)
+        ? 'Le contenu a changé ailleurs. Recharger la page puis refaire la modification.'
+        : (e.status === 401 || e.status === 403)
+          ? 'Jeton invalide ou expiré (code ' + e.status + ').'
+          : 'Échec de l\'enregistrement' + (e.status ? ' (code ' + e.status + ')' : '') + '.';
+      setMsg(m, 'err');
+    }).then(function () { b.disabled = false; });
+  }
+
+  $('save').addEventListener('click', save);
+  $('setupBtn').addEventListener('click', function () {
+    var t = $('tokenIn').value.trim(), r = detectRepo() || $('repoIn').value.trim();
+    if (!t || !r) { $('setupMsg').textContent = 'Jeton et dépôt requis.'; return; }
+    token = t; repo = r;
+    store.set('gh_token', t); store.set('gh_repo', r);
+    start();
+  });
+  window.addEventListener('beforeunload', function (e) { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+  var fromHash = new URLSearchParams(location.hash.slice(1)).get('t');
+  if (fromHash) {
+    store.set('gh_token', fromHash);
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+  token = fromHash || store.get('gh_token');
+  repo = detectRepo() || store.get('gh_repo');
+  if (token && repo) start(); else showSetup();
+})();
+</script>
+</body>
+</html>
